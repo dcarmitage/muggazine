@@ -246,6 +246,12 @@
             const pdfContainer = document.getElementById('pdf-container');
             const containerWidth = pdfContainer.clientWidth;
             defaultScale = (containerWidth - 40) / 595.276; // Assuming a default PDF width of 595.276 points (A4)
+            
+            // Adjust default scale for desktop
+            if (window.innerWidth > 768) {  // Assuming 768px as the breakpoint for desktop
+                defaultScale = 1.5;  // Set your desired default scale for desktop here
+            }
+            
             scale = defaultScale;
             if (pdfDoc) {
                 renderPage(pageNum);
