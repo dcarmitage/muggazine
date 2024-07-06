@@ -3,41 +3,261 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Magazine Cover</title>
+    <title>Magazine Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #EFEFEF;
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            height: 100%; 
+            background: #efefef; 
+            font-family: Arial, sans-serif;
+            overflow: hidden;
         }
-        #cover {
-            max-width: 80%;
-            max-height: 80%;
-            cursor: pointer;
-        }
-        #pdf-viewer {
-            display: none;
+        #landing-page {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #efefef;
+            z-index: 2000;
+        }
+        #logo-link {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 2001;
+            cursor: pointer;
+        }
+        #logo {
+            width: 100px;
+        }
+        #cover-image {
+            max-width: 80%;
+            max-height: 80%;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        #cover-image:hover {
+            transform: scale(1.02);
+        }
+        #pdf-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 60px;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        #pdf-viewer { 
+            margin-top: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        #pdf-controls { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: rgba(239, 239, 239, 0.9);
+            display: flex; 
+            justify-content: center;
+            align-items: center;
             z-index: 1000;
+        }
+        #pdf-controls-inner {
+            display: flex;
+            align-items: center;
+            background: rgba(0,0,0,0.05); 
+            padding: 10px 20px; 
+            border-radius: 30px;
+            backdrop-filter: blur(5px);
+        }
+        #pdf-controls button {
+            background: none;
+            border: none;
+            color: #333;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0 15px;
+            transition: opacity 0.3s;
+        }
+        #pdf-controls button:hover { opacity: 0.7; }
+        #pdf-controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+        #page-info, #zoom-info {
+            color: #333;
+            margin: 0 15px;
+            font-size: 14px;
+        }
+        @media (max-width: 768px) {
+            #logo-link {
+                top: 10px;
+                left: 10px;
+            }
+            #logo {
+                width: 80px;
+            }
+            #pdf-container {
+                top: 100px;
+            }
+            #pdf-controls-inner {
+                padding: 5px 10px;
+            }
+            #pdf-controls button {
+                font-size: 20px;
+                padding: 0 10px;
+            }
+            #page-info, #zoom-info {
+                font-size: 12px;
+            }
         }
     </style>
 </head>
 <body>
-    <img id="cover" src="frontmug2.png" alt="Magazine Cover" onclick="openPDF()">
-    <iframe id="pdf-viewer" src="muggazine.pdf" type="application/pdf"></iframe>
-
+    <a href="https://muggazine.com" id="logo-link">
+        <img id="logo" src="logo.png" alt="Muggazine Logo">
+    </a>
+    <div id="landing-page">
+        <img id="cover-image" src="cover.png" alt="Magazine Cover" onclick="openPDFViewer()">
+    </div>
+    <div id="pdf-container" style="display: none;">
+        <div id="pdf-viewer"></div>
+    </div>
+    <div id="pdf-controls" style="display: none;">
+        <div id="pdf-controls-inner">
+            <button id="prev" title="Previous Page">&#9664;</button>
+            <div id="page-info"><span id="page-num"></span> / <span id="page-count"></span></div>
+            <button id="next" title="Next Page">&#9654;</button>
+            <button id="zoom-out" title="Zoom Out">-</button>
+            <div id="zoom-info"><span id="zoom-value"></span>%</div>
+            <button id="zoom-in" title="Zoom In">+</button>
+            <button id="zoom-reset" title="Reset Zoom">Reset</button>
+        </div>
+    </div>
     <script>
-        function openPDF() {
-            document.getElementById('pdf-viewer').style.display = 'block';
+        let pdfDoc = null,
+            pageNum = 1,
+            pageRendering = false,
+            pageNumPending = null,
+            scale = 1.5,
+            defaultScale = 1.5;
+
+        const canvas = document.createElement('canvas'),
+              ctx = canvas.getContext('2d'),
+              viewer = document.getElementById('pdf-viewer'),
+              prevButton = document.getElementById('prev'),
+              nextButton = document.getElementById('next'),
+              zoomOutButton = document.getElementById('zoom-out'),
+              zoomInButton = document.getElementById('zoom-in'),
+              zoomResetButton = document.getElementById('zoom-reset'),
+              pageNumSpan = document.getElementById('page-num'),
+              pageCountSpan = document.getElementById('page-count'),
+              zoomValueSpan = document.getElementById('zoom-value');
+
+        viewer.appendChild(canvas);
+
+        function renderPage(num) {
+            pageRendering = true;
+            pdfDoc.getPage(num).then(function(page) {
+                const viewport = page.getViewport({scale: scale});
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                const renderContext = {
+                    canvasContext: ctx,
+                    viewport: viewport
+                };
+                const renderTask = page.render(renderContext);
+                renderTask.promise.then(function() {
+                    pageRendering = false;
+                    if (pageNumPending !== null) {
+                        renderPage(pageNumPending);
+                        pageNumPending = null;
+                    }
+                });
+            });
+            pageNumSpan.textContent = num;
+            prevButton.disabled = num <= 1;
+            nextButton.disabled = num >= pdfDoc.numPages;
+            updateZoomValue();
         }
+
+        function queueRenderPage(num) {
+            if (pageRendering) {
+                pageNumPending = num;
+            } else {
+                renderPage(num);
+            }
+        }
+
+        function onPrevPage() {
+            if (pageNum <= 1) return;
+            pageNum--;
+            queueRenderPage(pageNum);
+        }
+
+        function onNextPage() {
+            if (pageNum >= pdfDoc.numPages) return;
+            pageNum++;
+            queueRenderPage(pageNum);
+        }
+
+        function zoomIn() {
+            scale *= 1.1;
+            renderPage(pageNum);
+        }
+
+        function zoomOut() {
+            scale /= 1.1;
+            renderPage(pageNum);
+        }
+
+        function resetZoom() {
+            scale = defaultScale;
+            renderPage(pageNum);
+        }
+
+        function updateZoomValue() {
+            zoomValueSpan.textContent = Math.round(scale * 100);
+        }
+
+        prevButton.addEventListener('click', onPrevPage);
+        nextButton.addEventListener('click', onNextPage);
+        zoomInButton.addEventListener('click', zoomIn);
+        zoomOutButton.addEventListener('click', zoomOut);
+        zoomResetButton.addEventListener('click', resetZoom);
+
+        function adjustScale() {
+            const pdfContainer = document.getElementById('pdf-container');
+            const containerWidth = pdfContainer.clientWidth;
+            defaultScale = (containerWidth - 40) / 595.276; // Assuming a default PDF width of 595.276 points (A4)
+            scale = defaultScale;
+            if (pdfDoc) {
+                renderPage(pageNum);
+            }
+        }
+
+        function openPDFViewer() {
+            document.getElementById('landing-page').style.display = 'none';
+            document.getElementById('pdf-container').style.display = 'flex';
+            document.getElementById('pdf-controls').style.display = 'flex';
+            
+            pdfjsLib.getDocument('test.pdf').promise.then(function(pdfDoc_) {
+                pdfDoc = pdfDoc_;
+                pageCountSpan.textContent = pdfDoc.numPages;
+                adjustScale();
+                renderPage(pageNum);
+            });
+        }
+
+        window.addEventListener('resize', adjustScale);
     </script>
 </body>
 </html>
