@@ -249,7 +249,7 @@
             document.getElementById('pdf-container').style.display = 'flex';
             document.getElementById('pdf-controls').style.display = 'flex';
             
-            pdfjsLib.getDocument('test.pdf').promise.then(function(pdfDoc_) {
+            pdfjsLib.getDocument('Mag.pdf').promise.then(function(pdfDoc_) {
                 pdfDoc = pdfDoc_;
                 pageCountSpan.textContent = pdfDoc.numPages;
                 adjustScale();
